@@ -21,6 +21,8 @@ import {
   BookOpen,
   Globe,
   ArrowLeft,
+  ArrowUp,
+  ArrowDown,
   Send,
   Loader2,
   Bookmark,
@@ -34,7 +36,7 @@ import {
   Play
 } from 'lucide-react';
 
-import { useEffect, useState, ReactNode, useMemo, useRef, FormEvent } from 'react';
+import { useEffect, useState, ReactNode, useMemo, useRef, FormEvent, RefObject } from 'react';
 import { GoogleGenAI } from "@google/genai";
 
 // --- Types ---
@@ -230,10 +232,28 @@ export default function App() {
   const [items, setItems] = useState<FloatingItem[]>([]);
   const [stars, setStars] = useState<{ id: number; x: number; y: number; size: number; color: string }[]>([]);
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null);
+  const [studentGrade, setStudentGrade] = useState<string>('');
+  const [subjectPendingGrade, setSubjectPendingGrade] = useState<Subject | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState<string>('Grade 10 (Sophomore)');
+  const [customGradeText, setCustomGradeText] = useState<string>('');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const quizScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollToTop = (ref: RefObject<HTMLDivElement | null>) => {
+    if (ref.current) {
+      ref.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const scrollToBottom = (ref: RefObject<HTMLDivElement | null>) => {
+    if (ref.current) {
+      ref.current.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' });
+    }
+  };
 
   // --- Quiz Arena States ---
   const [activeView, setActiveView] = useState<'chat' | 'quiz'>('chat');
@@ -248,8 +268,10 @@ export default function App() {
   const [isGeneratingAIQuestion, setIsGeneratingAIQuestion] = useState(false);
   const [aiTopicForQuiz, setAiTopicForQuiz] = useState<string>('');
 
-  const handleSubjectSelect = (subject: Subject) => {
+  const handleSubjectSelect = (subject: Subject, grade: string) => {
+    setStudentGrade(grade);
     setActiveSubject(subject);
+    setSubjectPendingGrade(null);
     setActiveView('chat');
     setCurrentQuizIdx(0);
     setSelectedAnswer(null);
@@ -259,15 +281,21 @@ export default function App() {
     setCustomAIQuestion(null);
     setIsGeneratingAIQuestion(false);
     setAiTopicForQuiz(subject.topics[0] || '');
-    setChatMessages([{ role: 'model', text: `Greetings. I am your specialized AI for ${subject.name}. What shall we explore today?` }]);
+    setChatMessages([{ 
+      role: 'model', 
+      text: `Greetings. I am your specialized AI study companion for **${subject.name}**, calibrated specifically for **${grade}** level. \n\nWhat topic shall we explore today? I am fully prepared to tailor my explanations and quiz challenges directly to your grade level!` 
+    }]);
   };
 
   // AI Setup
   const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' }), []);
 
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTo({
+        top: chatScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
     }
   }, [chatMessages]);
 
@@ -297,7 +325,7 @@ export default function App() {
           { role: 'user', parts: [{ text: messageToSend }] }
         ],
         config: {
-          systemInstruction: activeSubject.systemInstruction,
+          systemInstruction: `${activeSubject.systemInstruction}\n\nCRITICAL CONTEXT: The student is using this study companion at the "${studentGrade || 'Grade 10'}" educational level. You must structure all your explanations, concepts, vocabulary, and examples to perfectly match a "${studentGrade || 'Grade 10'}" curriculum level. Explain complex topics using appropriate grade-level analogies and math.`,
         }
       });
 
@@ -335,6 +363,8 @@ export default function App() {
       }
 
       const prompt = `Generate a high-quality, thought-provoking multiple-choice quiz question about the topic of "${topic}" in the context of the subject "${activeSubject.name}".
+
+CRITICAL PARADIGM: Tailor the quiz question, alternative options, and explanations specifically for a student at the "${studentGrade || 'Grade 10'}" level. It should be challenging but completely age-appropriate.
     
 The question must have exactly 4 plausible options, with one clear correct option.
 Include an educational explanation explaining why the correct answer is right and why other ones are incorrect.
@@ -614,7 +644,10 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
                 <SubjectCard 
                   key={subject.id} 
                   subject={subject} 
-                  onClick={() => handleSubjectSelect(subject)} 
+                  onClick={() => {
+                    setSubjectPendingGrade(subject);
+                    setCustomGradeText('');
+                  }} 
                 />
               ))}
             </div>
@@ -665,7 +698,14 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
                     <activeSubject.icon size={24} className="text-white" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-display font-medium mb-2">{activeSubject.name}</h2>
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h2 className="text-2xl font-display font-medium">{activeSubject.name}</h2>
+                      {studentGrade && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 border border-purple-500/35 text-purple-300 font-medium font-sans">
+                          {studentGrade}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-white/40 leading-relaxed font-sans">{activeSubject.description}</p>
                   </div>
 
@@ -741,8 +781,11 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
 
                 {/* View Conditional Layout */}
                 {activeView === 'chat' ? (
-                  <>
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar scroll-smooth">
+                  <div className="flex-1 flex flex-col min-h-0 relative">
+                    <div 
+                      ref={chatScrollRef}
+                      className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar scroll-smooth"
+                    >
                       {chatMessages.map((msg, i) => (
                         <motion.div
                           key={i}
@@ -770,6 +813,26 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
                       <div ref={chatEndRef} />
                     </div>
 
+                    {/* AI Discussion Tab Scroll Buttons */}
+                    <div className="absolute bottom-24 right-6 flex flex-col gap-2 z-10">
+                      <button 
+                        type="button"
+                        onClick={() => scrollToTop(chatScrollRef)}
+                        className="p-2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 hover:border-purple-500/40 transition-all flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer select-none"
+                        title="Scroll to Top"
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => scrollToBottom(chatScrollRef)}
+                        className="p-2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 hover:border-purple-500/40 transition-all flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer select-none"
+                        title="Scroll to Bottom"
+                      >
+                        <ArrowDown size={14} />
+                      </button>
+                    </div>
+
                     <form onSubmit={handleSendMessage} className="p-4 bg-white/5 border-t border-white/10 flex gap-3 flex-shrink-0">
                       <input
                         value={inputMessage}
@@ -785,10 +848,14 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
                         <Send size={18} />
                       </button>
                     </form>
-                  </>
+                  </div>
                 ) : (
                   // Quiz Arena View Interface
-                  <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6">
+                  <div className="flex-1 flex flex-col relative min-h-0">
+                    <div 
+                      ref={quizScrollRef}
+                      className="flex-1 overflow-y-auto custom-scrollbar p-6 scroll-smooth"
+                    >
                     {(() => {
                       const questionsList = SUBJECT_QUIZZES[activeSubject.id] || [];
                       const currentQuestion = customAIQuestion || questionsList[currentQuizIdx];
@@ -1090,6 +1157,27 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
                         </div>
                       </div>
                     )}
+                    </div>
+
+                    {/* Quiz Arena Tab Scroll Buttons */}
+                    <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
+                      <button 
+                        type="button"
+                        onClick={() => scrollToTop(quizScrollRef)}
+                        className="p-2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 hover:border-purple-500/40 transition-all flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer select-none"
+                        title="Scroll to Top"
+                      >
+                        <ArrowUp size={14} />
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => scrollToBottom(quizScrollRef)}
+                        className="p-2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 hover:border-purple-500/40 transition-all flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer select-none"
+                        title="Scroll to Bottom"
+                      >
+                        <ArrowDown size={14} />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1097,6 +1185,130 @@ You MUST respond strictly in valid JSON format. Do not write any explanations be
           </motion.div>
         )}
       </div>
+
+      {/* Grade Selector Modal */}
+      {subjectPendingGrade && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md pointer-events-auto">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-lg overflow-hidden border border-white/10 rounded-3xl bg-slate-950/90 text-left shadow-2xl relative"
+          >
+            {/* Modal Header */}
+            <div className={`p-6 bg-gradient-to-br ${subjectPendingGrade.color} text-white relative`}>
+              <button 
+                type="button"
+                onClick={() => setSubjectPendingGrade(null)}
+                className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 p-2 rounded-full transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="p-2 bg-white/15 rounded-xl">
+                  {(() => {
+                    const IconComp = subjectPendingGrade.icon;
+                    return <IconComp size={20} />;
+                  })()}
+                </div>
+                <span className="text-xs uppercase tracking-wider font-semibold opacity-85">Personalize Study Companion</span>
+              </div>
+              <h2 className="text-2xl font-display font-semibold">Select Your Academic Grade</h2>
+              <p className="text-xs text-white/70 mt-1">Calibrating AI instruction specifically for your educational level.</p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              {/* Preset Buttons */}
+              <div>
+                <label className="block text-xs uppercase font-semibold text-white/50 tracking-wider mb-3">Academic Level presets</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    'Grade 9 (Freshman)',
+                    'Grade 10 (Sophomore)',
+                    'Grade 11 (Junior)',
+                    'Grade 12 (Senior)',
+                    'College / University',
+                    'General / Professional'
+                  ].map((preset) => {
+                    const isSelected = !customGradeText && selectedPreset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPreset(preset);
+                          setCustomGradeText('');
+                        }}
+                        className={`p-3 text-sm rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer ${
+                          isSelected 
+                            ? 'bg-purple-600/20 border-purple-500 text-white shadow-md' 
+                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        <span className="font-sans font-medium">{preset}</span>
+                        {isSelected && <Sparkles size={14} className="text-purple-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom Input */}
+              <div>
+                <label className="block text-xs uppercase font-semibold text-white/50 tracking-wider mb-2">Or enter any custom level</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="e.g. Grade 8, Postgraduate, AP Biology, etc."
+                    value={customGradeText}
+                    onChange={(e) => {
+                      setCustomGradeText(e.target.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const finalGrade = customGradeText.trim() || selectedPreset || 'Grade 10';
+                        handleSubjectSelect(subjectPendingGrade, finalGrade);
+                      }
+                    }}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/30 text-sm focus:outline-none focus:border-purple-500/50 transition-colors"
+                  />
+                  {customGradeText && (
+                    <span className="absolute right-3 top-3.5 text-[10px] uppercase font-semibold text-purple-400 animate-pulse">
+                      Custom Active
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSubjectPendingGrade(null)}
+                  className="flex-1 py-3 text-sm font-medium rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white transition-colors cursor-pointer text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const finalGrade = customGradeText.trim() || selectedPreset || 'Grade 10';
+                    handleSubjectSelect(subjectPendingGrade, finalGrade);
+                  }}
+                  className={`flex-1 py-3 text-sm font-semibold rounded-xl text-black transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 shadow-lg ${
+                    (selectedPreset || customGradeText) 
+                      ? 'bg-gradient-to-r from-purple-400 to-pink-400 hover:from-purple-300 hover:to-pink-300'
+                      : 'bg-white hover:bg-white/90'
+                  }`}
+                >
+                  <span>Go to Companion</span>
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Subtle UI Accents */}
       <div className="fixed bottom-8 left-8 z-20 flex gap-6 text-[10px] tracking-[0.3em] font-display uppercase text-white/30">
